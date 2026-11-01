@@ -31,3 +31,9 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# The program built here
+/altserialport
+
+# The release files of scripts/build.sh and the packages
+/dist/
