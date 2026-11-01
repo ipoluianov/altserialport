@@ -119,22 +119,37 @@ An MCP client (Claude Code, Claude Desktop…) runs `altserialport mcp`; its
 tools list the ports, open one, write, read, wait for a pattern, set the
 lines and reset ESP32/Arduino boards.
 
-## Building
+## Installation
 
-```sh
-go build -ldflags="-s -w"                                 # Linux, macOS
-GOOS=windows go build -ldflags="-s -w -H=windowsgui"
-```
+Download a build for your system from the
+[releases](https://github.com/ipoluianov/altserialport/releases):
 
-A release binary is about 18 MB. `scripts/build.sh` builds all the systems;
-`scripts/package-deb.sh`, `package-rpm.sh`, `package-dmg.sh` and
-`linux-install.sh` make the packages and the user-level install. On Windows
-the program installs itself: ☰ → Install.
+- **Windows:** `altserialport.exe`.
+- **macOS** (Apple Silicon): the `.dmg` image.
+- **Linux** (x86-64 and ARM64): a `.deb` or `.rpm` package, or a user-level
+  install (no root) that picks the build for your machine:
 
-No C compiler is needed. The only dependencies are the UI library
-[nui](https://github.com/ipoluianov/nui) and `golang.org/x/sys`.
+  ```sh
+  curl -fsSL https://github.com/ipoluianov/altserialport/releases/latest/download/linux-install.sh | bash
+  ```
 
-Settings are stored in `~/.altbins/.altserialport/`.
+Settings, profiles and logs are stored in `~/.altbins/.altserialport/`.
+Removing the program leaves them in place.
+
+### Windows
+
+The exe is not signed, so on the first start SmartScreen may say "Windows
+protected your PC". Click **More info**, then **Run anyway**.
+
+A downloaded copy offers to install itself into `%USERPROFILE%\.altbins`
+with the **Install** link in the status bar. It adds AltSerialPort to the
+Start menu, the desktop and "Installed apps". When a newer version is
+started from a download, the link reads **Update**. Remove AltSerialPort
+from "Installed apps" or with the **Uninstall** link.
+
+### macOS
+
+Open the `.dmg` and drag AltSerialPort to Applications.
 
 ### Linux
 
@@ -144,6 +159,23 @@ cannot be opened, add yourself to it and log in again:
 ```sh
 sudo usermod -aG dialout $USER
 ```
+
+## Building
+
+```sh
+build/all.sh            # every platform; build\all.bat on Windows
+build/linux-amd64.sh    # one platform: linux-arm64, windows-amd64, darwin-arm64
+```
+
+The files go to `bin/<date>-<version>/`: the binaries, `.deb` and `.rpm`
+(by nfpm), the archives and `linux-install.sh` for the user-level install,
+the `.dmg` (signed when the Developer ID certificate is in the keychain;
+`build/notarize.sh` notarizes it). The Windows exe gets its icon and version
+from go-winres. No C compiler is needed. The version comes from
+`git describe`.
+
+`icon.png` is rendered from the drawing of the `appicon` package by
+`scripts/render-icon.sh`; `icon.svg` is the same drawing.
 
 ## Code
 

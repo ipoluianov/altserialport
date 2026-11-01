@@ -35,5 +35,7 @@ go.work.sum
 # The program built here
 /altserialport
 
-# The release files of scripts/build.sh and the packages
-/dist/
+
+# Build output
+bin/
+*.syso

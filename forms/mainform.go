@@ -14,6 +14,7 @@ import (
 	"github.com/ipoluianov/altserialport/app"
 	"github.com/ipoluianov/altserialport/buffer"
 	"github.com/ipoluianov/altserialport/config"
+	"github.com/ipoluianov/altserialport/install"
 	"github.com/ipoluianov/altserialport/proto"
 	"github.com/ipoluianov/altserialport/remote"
 	"github.com/ipoluianov/altserialport/rules"
@@ -62,22 +63,23 @@ type MainForm struct {
 
 	pending atomic.Bool // the session has chunks to take
 
-	port2       *Port2
-	menuBtn     *ui.ToolButton
-	stopRemote  func()
-	plotter     *Plotter
-	macros      *MacroPanel
-	hsplit      *ui.Splitter // the terminal and the macros
-	vsplit      *ui.Splitter // the terminal and the plot
-	ruleSet     *rules.Set
-	lines       proto.Lines
-	lastTrigger map[int]time.Time
-	stats       stats
-	lastTX      int64 // the time of the last chunk sent, for the response times
-	checksum    proto.Checksum
-	repeat      *ui.Timer
-	repeatText  string
-	saveTimer   *ui.Timer
+	port2         *Port2
+	installStatus install.Status
+	menuBtn       *ui.ToolButton
+	stopRemote    func()
+	plotter       *Plotter
+	macros        *MacroPanel
+	hsplit        *ui.Splitter // the terminal and the macros
+	vsplit        *ui.Splitter // the terminal and the plot
+	ruleSet       *rules.Set
+	lines         proto.Lines
+	lastTrigger   map[int]time.Time
+	stats         stats
+	lastTX        int64 // the time of the last chunk sent, for the response times
+	checksum      proto.Checksum
+	repeat        *ui.Timer
+	repeatText    string
+	saveTimer     *ui.Timer
 }
 
 // NewMainForm builds the window
@@ -115,6 +117,11 @@ func NewMainForm() *MainForm {
 	m.status.DTR.OnClick = func() { m.toggleLine(true) }
 	m.status.RTS.OnClick = func() { m.toggleLine(false) }
 	m.status.SetContextMenu(m.statusMenu())
+	// A downloaded copy offers to install or update itself, the installed one to be removed
+	m.installStatus = install.CurrentStatus()
+	if m.installStatus != install.StatusNone {
+		m.status.AddLink(func() string { return installText(m.installStatus) }, m.onInstallLink)
+	}
 
 	p := m.Form.Panel()
 	p.SetPanelPadding(0)

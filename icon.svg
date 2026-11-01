@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- The same drawing as appicon.Image: a blue tile with the plug of a
+       serial port (DE-9) in white, its pins in the blue of the tile -->
+  <rect x="8" y="8" width="240" height="240" rx="48" fill="#1f6fd6"/>
+  <path d="M44 78h168l-22 100H66z" fill="#ffffff"/>
+  <g fill="#1f6fd6">
+    <circle cx="76" cy="108" r="8"/>
+    <circle cx="102" cy="108" r="8"/>
+    <circle cx="128" cy="108" r="8"/>
+    <circle cx="154" cy="108" r="8"/>
+    <circle cx="180" cy="108" r="8"/>
+    <circle cx="89" cy="146" r="8"/>
+    <circle cx="115" cy="146" r="8"/>
+    <circle cx="141" cy="146" r="8"/>
+    <circle cx="167" cy="146" r="8"/>
+  </g>
+</svg>

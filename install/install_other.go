@@ -4,21 +4,20 @@ package install
 
 import "errors"
 
-// errUnsupported: on Linux and macOS the program is installed by the
-// packages
-var errUnsupported = errors.New("install: only the Windows build installs itself")
+var errNotSupported = errors.New("installation is supported on Windows only")
 
-// Status returns Unsupported: the program is installed by the packages
-func Status() State { return Unsupported }
+// CurrentStatus is always StatusNone: there is nothing to offer here
+func CurrentStatus() Status { return StatusNone }
 
-// Install does nothing here
-func Install() error { return errUnsupported }
+func IsInstalledCopy() bool { return false }
 
-// Uninstall does nothing here
-func Uninstall(quiet bool) error { return errUnsupported }
+func Install() error { return errNotSupported }
 
-// HandleArgs handles nothing here
-func HandleArgs(args []string) (handled bool) { return false }
+func Uninstall() error { return errNotSupported }
 
-// StartInstalled does nothing here
-func StartInstalled() error { return errUnsupported }
+func StartInstalled() error { return errNotSupported }
+
+// Confirm and Inform are the dialogs of the uninstaller, which has no window
+func Confirm(title, text string) bool { return false }
+
+func Inform(title, text string) {}

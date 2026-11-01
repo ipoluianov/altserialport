@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=AltSerialPort
+Comment=Terminal for serial ports
+Exec=altserialport
+Icon=altserialport
+Terminal=false
+Categories=Development;Electronics;Utility;
+Keywords=serial;uart;com;tty;terminal;arduino;esp32;
+StartupNotify=false

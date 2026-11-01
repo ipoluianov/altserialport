@@ -291,7 +291,7 @@ Nov 1, 2026: every requirement of section 4 is implemented.
 | Logging LOG-1…4 | record button, ☰ → Record each connection (rotation by size), Save as (text, HTML, hex dump, raw), ☰ → Open a log or a file, drag and drop |
 | Profiles PROF-1…3 | per device; ☰ → Profiles (named, export, import) |
 | Automation AUTO-1…4 | `cli`, `mcp`, `remote` (the window shares its port with them) |
-| Series SER-1…6 | themes, shortcuts, en/ru; `install` and `scripts/` for the packages |
+| Series SER-1…6 | themes, shortcuts, en/ru; `install` (the Install link of the status bar, as in the other AltBins programs) and `build/` for the packages |
 
 Not checked yet: real hardware of each kind, Windows and macOS (built and
 vetted only), the signing of the macOS package (needs a certificate),

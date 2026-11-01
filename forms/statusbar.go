@@ -85,6 +85,28 @@ type StatusBar struct {
 	msgTimer *ui.Timer
 
 	DTR, RTS, CTS, DSR, DCD, RI *led
+	row                         *ui.HBox
+}
+
+// AddLink adds a link at the right end: a text that does something when
+// clicked, underlined under the mouse
+func (s *StatusBar) AddLink(text func() string, onClick func()) *ui.Label {
+	l := ui.NewLabel("")
+	l.SetTextFunc(text)
+	l.SetForegroundColor(colorLink.get())
+	l.OnHoverChanged.Connect(l.SetUnderline)
+	ui.OnThemeChanged.Connect(func(bool) { l.SetForegroundColor(colorLink.get()) })
+	l.SetMouseCursor(ui.MouseCursorPointer)
+	l.OnMouseDown.Connect(func(e *ui.MouseEvent) {
+		if e.Button == ui.MouseButtonLeft {
+			onClick()
+			e.Handled = true
+		}
+	})
+	s.row.Add(fixedSpace(6))
+	s.row.Add(l)
+	s.row.Add(fixedSpace(8))
+	return l
 }
 
 // NewStatusBar makes the status bar
@@ -145,6 +167,7 @@ func NewStatusBar() *StatusBar {
 	row.Add(s.DCD)
 	row.Add(s.RI)
 	row.Add(fixedSpace(6))
+	s.row = row
 	s.AddWidget(0, 0, row)
 
 	s.msgTimer = s.NewTimer(4*time.Second, func() { s.message.SetText("") })

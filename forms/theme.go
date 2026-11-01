@@ -54,6 +54,7 @@ var (
 	colorError     = themeColor{hex("#f85149"), hex("#cf222e")}
 	colorRecord    = themeColor{hex("#f85149"), hex("#d1242f")}
 	colorLEDOff    = themeColor{hex("#3a3f47"), hex("#c9ced6")}
+	colorLink      = themeColor{hex("#3d8bf2"), hex("#1d6fb5")}
 	colorSecondary = themeColor{hex("#8b929c"), hex("#6e7781")}
 )
 

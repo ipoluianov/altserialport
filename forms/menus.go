@@ -314,7 +314,6 @@ func (m *MainForm) mainMenu() *ui.ContextMenu {
 	})
 	menu.AddSeparator()
 	menu.AddItem(T().NewWindow, m.newWindow)
-	m.installMenu(menu)
 	menu.AddSeparator()
 
 	theme := ui.NewContextMenu(owner)

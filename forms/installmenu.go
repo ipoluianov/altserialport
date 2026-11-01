@@ -1,43 +1,70 @@
 package forms
 
 import (
-	"github.com/ipoluianov/altserialport/app"
+	"fmt"
+
+	"github.com/ipoluianov/altserialport/config"
 	"github.com/ipoluianov/altserialport/install"
 	"github.com/ipoluianov/nui/ui"
 )
 
-// installMenu adds Install, Update or Uninstall where the program installs
-// itself (Windows); elsewhere the packages of the system do it
-func (m *MainForm) installMenu(menu *ui.ContextMenu) {
-	switch install.Status() {
-	case install.Portable:
-		menu.AddItem(T().InstallLink, m.install)
-	case install.UpdateAvailable:
-		menu.AddItem(T().UpdateLink, m.install)
-	case install.Installed:
-		menu.AddItem(T().UninstallLink, m.uninstall)
+// installText is the text of the install link for what it does now
+func installText(s install.Status) string {
+	switch s {
+	case install.StatusUpdate:
+		return T().UpdateLink
+	case install.StatusUninstall:
+		return T().UninstallLink
 	}
+	return T().InstallLink
 }
 
-// install copies the program to its place, then the installed copy takes
-// over the window
-func (m *MainForm) install() {
-	if err := install.Install(); err != nil {
-		ui.ShowMessageBox(m.Form.Panel(), app.DisplayName, err.Error())
+// UninstallAsk is the question before the program is removed
+func UninstallAsk() string { return fmt.Sprintf(T().UninstallAsk, config.Dir()) }
+
+// onInstallLink installs, updates or removes the program, as the link says
+func (m *MainForm) onInstallLink() {
+	if m.installStatus == install.StatusUninstall {
+		m.uninstall()
 		return
 	}
-	ui.ShowMessageBox(m.Form.Panel(), app.DisplayName, T().Installed)
-	if err := install.StartInstalled(); err == nil {
-		m.Form.RequestClose()
-	}
+	m.install()
 }
 
+// install copies the program to ~/.altbins and registers it, then quits for
+// the installed copy to start (see main). Over an older installed version
+// it is the same: that one is replaced.
+func (m *MainForm) install() {
+	ui.ShowQuestionMessageBoxOKCancel(m.Form.Panel(), installText(m.installStatus),
+		fmt.Sprintf(T().InstallAsk, install.Dir()), func() {
+			if err := install.Install(); err != nil {
+				ui.ShowMessageBox(m.Form.Panel(), T().InstallLink, fmt.Sprintf(T().InstallFailed, err.Error()))
+				return
+			}
+			install.RelaunchAfterExit()
+			m.Form.RequestClose()
+		}, nil)
+}
+
+// uninstall removes the installed copy; the settings and the logs stay.
+// When that is this copy, it quits and its binary is deleted once it has.
 func (m *MainForm) uninstall() {
-	ui.ShowQuestionMessageBoxYesNo(m.Form.Panel(), app.DisplayName, T().UninstallLink+"?", func() {
-		if err := install.Uninstall(true); err != nil {
-			ui.ShowMessageBox(m.Form.Panel(), app.DisplayName, err.Error())
+	ui.ShowQuestionMessageBoxOKCancel(m.Form.Panel(), T().UninstallLink, UninstallAsk(), func() {
+		installed := install.IsInstalledCopy()
+		if err := install.Uninstall(); err != nil {
+			ui.ShowMessageBox(m.Form.Panel(), T().UninstallLink, err.Error())
 			return
 		}
-		m.Form.RequestClose()
+		if installed {
+			m.Form.RequestClose()
+			return
+		}
+		m.installStatus = install.CurrentStatus()
+		m.Form.ShowToast(T().Uninstalled, ui.ToastSuccess)
 	}, nil)
+}
+
+// ShowInstalled tells in the installed copy that it has just been installed
+func (m *MainForm) ShowInstalled() {
+	m.Form.ShowToast(T().Installed, ui.ToastSuccess)
 }

@@ -1,173 +1,65 @@
-//go:build windows
-
 package install
 
 import (
+	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"image"
+	_ "image/png"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"github.com/ipoluianov/altserialport/app"
-	"github.com/ipoluianov/altserialport/appicon"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
 )
 
-// uninstallKey is the entry of the program in "Installed apps", for the
-// current user only
-const uninstallKey = `Software\Microsoft\Windows\CurrentVersion\Uninstall\` + keyName
+// uninstallKey is the entry in "Installed apps"; one for the program, so an
+// install over an older version updates it instead of adding another
+const uninstallKey = `Software\Microsoft\Windows\CurrentVersion\Uninstall\` + appName
 
-// Status tells how the running copy relates to the installed one
-func Status() State {
-	exe, err := runningExe()
-	if err != nil {
-		return Portable
-	}
-	target := ExePath()
-	if samePath(exe, target) {
-		return Installed
-	}
-	if _, err := os.Stat(target); err != nil {
-		return Portable
-	}
-	if isNewer(app.Version, installedVersion()) {
-		return UpdateAvailable
-	}
-	return OtherInstalled
+var (
+	ole32                = windows.NewLazySystemDLL("ole32.dll")
+	procCoInitializeEx   = ole32.NewProc("CoInitializeEx")
+	procCoUninitialize   = ole32.NewProc("CoUninitialize")
+	procCoCreateInstance = ole32.NewProc("CoCreateInstance")
+	procMessageBoxW      = windows.NewLazySystemDLL("user32.dll").NewProc("MessageBoxW")
+)
+
+// ExePath is the installed binary
+func ExePath() string {
+	return filepath.Join(Dir(), appName+".exe")
 }
 
-// Install copies the running exe to the place of the installed copy (when
-// it is not that copy), makes the links in the Start menu and on the
-// Desktop and writes the entry in "Installed apps". Over an installed copy
-// that is running, the exe is renamed to .old first: Windows lets a running
-// exe be renamed, not replaced. The .old files are deleted on the next
-// start, by HandleArgs.
-func Install() error {
-	exe, err := runningExe()
-	if err != nil {
-		return err
-	}
-	dir := Dir()
-	target := ExePath()
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	if !samePath(exe, target) {
-		if err := moveAside(target); err != nil {
-			return err
-		}
-		if err := copyFile(exe, target); err != nil {
-			return err
-		}
-	}
-	// The exe has no icon of its own: the links and the entry use this file
-	if ico, err := appicon.ICO([]int{16, 24, 32, 48, 64, 128, 256}); err == nil {
-		os.WriteFile(iconPath(), ico, 0o644)
-	}
-	if err := writeShortcuts(target, dir); err != nil {
-		return fmt.Errorf("the links are not made: %w", err)
-	}
-	if err := writeUninstallEntry(target, dir); err != nil {
-		return fmt.Errorf("the entry in Installed apps is not made: %w", err)
-	}
-	return nil
+// iconPath is the icon of the shortcuts, next to the binary as on Linux
+func iconPath() string {
+	return filepath.Join(Dir(), "."+appName+"-icon.ico")
 }
 
-// Uninstall removes the links, the entry in "Installed apps" and the files
-// of the installed copy. When the installed copy is the one running, its
-// folder is removed by cmd a second after the program exits. The settings
-// are kept. quiet is not used here: the questions are asked by HandleArgs.
-func Uninstall(quiet bool) error {
-	_ = quiet
-	dir := Dir()
-	exe, err := runningExe()
-	if err == nil && isWithin(exe, dir) {
-		if err := removeAfterExit(dir); err != nil {
-			return err
-		}
-	} else if err := os.RemoveAll(dir); err != nil {
-		// Another window of the installed copy is still open
-		return fmt.Errorf("%s is running: close its windows and try again (%w)", app.DisplayName, err)
+// CurrentStatus compares this copy with the installed one
+func CurrentStatus() Status {
+	if IsInstalledCopy() {
+		return StatusUninstall
 	}
-	var errs []error
-	for _, lnk := range shortcutPaths() {
-		if err := os.Remove(lnk); err != nil && !errors.Is(err, os.ErrNotExist) {
-			errs = append(errs, err)
-		}
+	if _, err := os.Stat(ExePath()); err != nil {
+		return StatusInstall
 	}
-	if err := registry.DeleteKey(registry.CURRENT_USER, uninstallKey); err != nil && !errors.Is(err, registry.ErrNotExist) {
-		errs = append(errs, err)
+	if versionNewer(app.Version, installedVersion()) {
+		return StatusUpdate
 	}
-	return errors.Join(errs...)
+	return StatusUninstall
 }
 
-// HandleArgs does what the command line asks of the installer and tells
-// whether the program should exit then. It also deletes the .old files
-// left by an update. "--uninstall" removes the program after asking, with
-// "--quiet" too without asking and without telling the result: that is
-// what "Installed apps" runs.
-func HandleArgs(args []string) (handled bool) {
-	removeOld()
-	if !hasFlag(args, "uninstall") {
-		return false
-	}
-	quiet := hasFlag(args, "quiet")
-	if !quiet {
-		q := fmt.Sprintf("Remove %s from this computer?\n\nThe settings are kept.", app.DisplayName)
-		if messageBox(q, mbYesNo|mbIconQuestion) != idYes {
-			return true
-		}
-	}
-	err := Uninstall(quiet)
-	if !quiet {
-		if err != nil {
-			messageBox(fmt.Sprintf("%s is not removed completely:\n\n%v", app.DisplayName, err), mbOK|mbIconError)
-		} else {
-			messageBox(fmt.Sprintf("%s is removed.", app.DisplayName), mbOK|mbIconInformation)
-		}
-	}
-	return true
-}
-
-// StartInstalled starts the installed copy, apart from this process
-func StartInstalled() error {
-	cmd := exec.Command(ExePath())
-	cmd.Dir = Dir()
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CreationFlags: windows.CREATE_NEW_PROCESS_GROUP | windows.DETACHED_PROCESS,
-	}
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	return cmd.Process.Release()
-}
-
-// runningExe returns the path of the running exe with the links resolved
-func runningExe() (string, error) {
-	exe, err := os.Executable()
-	if err != nil {
-		return "", err
-	}
-	if p, err := filepath.EvalSymlinks(exe); err == nil {
-		exe = p
-	}
-	return exe, nil
-}
-
-// isWithin tells whether the path is in the folder
-func isWithin(path, dir string) bool {
-	rel, err := filepath.Rel(strings.ToLower(filepath.Clean(dir)), strings.ToLower(filepath.Clean(path)))
-	return err == nil && rel != ".." && !strings.HasPrefix(rel, `..\`)
-}
-
-// installedVersion returns the version of the installed copy written in
-// its entry in "Installed apps", or "" when there is none
+// installedVersion is the version of the installed copy from its entry in
+// "Installed apps", "" when it cannot be read
 func installedVersion() string {
 	k, err := registry.OpenKey(registry.CURRENT_USER, uninstallKey, registry.QUERY_VALUE)
 	if err != nil {
@@ -181,201 +73,343 @@ func installedVersion() string {
 	return v
 }
 
-// moveAside makes the place of the exe free: deletes it, or, when it is
-// running, renames it to a free name ending in .old
-func moveAside(target string) error {
-	err := os.Remove(target)
-	if err == nil || errors.Is(err, os.ErrNotExist) {
-		return nil
+// IsInstalledCopy tells whether the running binary is the installed one
+func IsInstalledCopy() bool {
+	exe, err := runningExe()
+	if err != nil {
+		return false
 	}
-	for i := 0; i < 100; i++ {
-		old := target + ".old"
-		if i > 0 {
-			old = fmt.Sprintf("%s.%d.old", target, i)
-		}
-		if _, err := os.Lstat(old); err == nil {
-			if os.Remove(old) != nil {
-				continue // an older copy is still running too
-			}
-		}
-		if err := os.Rename(target, old); err == nil {
-			return nil
-		}
-	}
-	return fmt.Errorf("the installed copy cannot be replaced: %w", err)
+	return strings.EqualFold(filepath.Clean(exe), filepath.Clean(ExePath()))
 }
 
-// removeOld deletes the exe files left by updates. Those still running
-// are left for the next time.
-func removeOld() {
-	files, _ := filepath.Glob(filepath.Join(Dir(), "*.old"))
-	for _, f := range files {
-		_ = os.Remove(f)
+func runningExe() (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
 	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	return exe, nil
 }
 
-// copyFile copies the exe through a temporary file, so a copy broken
-// halfway is never left in its place
+// Install copies the running binary to ~/.altbins, adds the shortcuts to
+// the Start menu and the desktop and the entry to "Installed apps". Over an
+// installed copy it replaces the binary and updates the rest.
+func Install() error {
+	src, err := runningExe()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(Dir(), 0o755); err != nil {
+		return err
+	}
+	if err := replaceFile(src, ExePath()); err != nil {
+		return err
+	}
+	icon := ExePath()
+	if err := writeIcon(iconPath()); err == nil {
+		icon = iconPath()
+	}
+	if err := createShortcuts(icon); err != nil {
+		return err
+	}
+	return register(icon)
+}
+
+// replaceFile copies src over dst. A running binary cannot be overwritten
+// but can be renamed, so the old one is moved aside first: several windows
+// of the installed copy may be open.
+func replaceFile(src, dst string) error {
+	tmp := dst + ".new"
+	if err := copyFile(src, tmp); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	old := dst + ".old"
+	os.Remove(old)
+	if err := os.Rename(dst, old); err != nil && !os.IsNotExist(err) {
+		os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, dst); err != nil {
+		os.Rename(old, dst)
+		return err
+	}
+	os.Remove(old) // fails while it still runs; then it goes on the next update
+	return nil
+}
+
 func copyFile(src, dst string) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
 	defer in.Close()
-	tmp := dst + ".tmp"
-	out, err := os.Create(tmp)
+	out, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
 	if _, err := io.Copy(out, in); err != nil {
 		out.Close()
-		os.Remove(tmp)
 		return err
 	}
-	if err := out.Close(); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	if err := os.Rename(tmp, dst); err != nil {
-		os.Remove(tmp)
-		return err
-	}
-	return nil
+	return out.Close()
 }
 
-// shortcutPaths returns the paths of the links: in the Start menu and on
-// the Desktop
+// writeIcon saves the PNG icon as an .ico, which may hold a PNG as it is
+func writeIcon(path string) error {
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(iconPNG))
+	if err != nil {
+		return err
+	}
+	if cfg.Width > 256 || cfg.Height > 256 {
+		return errors.New("the icon is larger than 256 pixels")
+	}
+	var buf bytes.Buffer
+	// ICONDIR: reserved, the type 1 (an icon), one image
+	binary.Write(&buf, binary.LittleEndian, [3]uint16{0, 1, 1})
+	// ICONDIRENTRY: the width and the height (0 is 256), no palette, 1 plane,
+	// 32 bits, the size and the offset of the image
+	buf.Write([]byte{byte(cfg.Width), byte(cfg.Height), 0, 0})
+	binary.Write(&buf, binary.LittleEndian, [2]uint16{1, 32})
+	binary.Write(&buf, binary.LittleEndian, [2]uint32{uint32(len(iconPNG)), 6 + 16})
+	buf.Write(iconPNG)
+	return os.WriteFile(path, buf.Bytes(), 0o644)
+}
+
+// shortcutPaths are the shortcuts in the Start menu and on the desktop
 func shortcutPaths() []string {
-	name := keyName + ".lnk"
-	programs, err := windows.KnownFolderPath(windows.FOLDERID_Programs, windows.KF_FLAG_DEFAULT)
-	if err != nil {
-		programs = filepath.Join(os.Getenv("APPDATA"), `Microsoft\Windows\Start Menu\Programs`)
+	var paths []string
+	for _, folder := range []*windows.KNOWNFOLDERID{windows.FOLDERID_Programs, windows.FOLDERID_Desktop} {
+		if dir, err := windows.KnownFolderPath(folder, 0); err == nil {
+			paths = append(paths, filepath.Join(dir, app.DisplayName+".lnk"))
+		}
 	}
-	desktop, err := windows.KnownFolderPath(windows.FOLDERID_Desktop, windows.KF_FLAG_DEFAULT)
-	if err != nil {
-		desktop = filepath.Join(os.Getenv("USERPROFILE"), "Desktop")
-	}
-	return []string{filepath.Join(programs, name), filepath.Join(desktop, name)}
+	return paths
 }
 
-// writeShortcuts makes the links to the exe with WScript.Shell through
-// PowerShell, in a hidden window: Go has no COM of its own
-func writeShortcuts(exe, dir string) error {
-	var sb strings.Builder
-	sb.WriteString("$ErrorActionPreference = 'Stop'\n")
-	sb.WriteString("$sh = New-Object -ComObject WScript.Shell\n")
+func createShortcuts(icon string) error {
 	for _, lnk := range shortcutPaths() {
-		if err := os.MkdirAll(filepath.Dir(lnk), 0o755); err != nil {
-			return err
+		if err := createShortcut(lnk, ExePath(), icon); err != nil {
+			return fmt.Errorf("%s: %w", lnk, err)
 		}
-		fmt.Fprintf(&sb, "$s = $sh.CreateShortcut(%s)\n", psQuote(lnk))
-		fmt.Fprintf(&sb, "$s.TargetPath = %s\n", psQuote(exe))
-		fmt.Fprintf(&sb, "$s.WorkingDirectory = %s\n", psQuote(dir))
-		fmt.Fprintf(&sb, "$s.IconLocation = %s\n", psQuote(iconPath()))
-		fmt.Fprintf(&sb, "$s.Description = %s\n", psQuote(app.DisplayName+": a terminal for serial ports"))
-		sb.WriteString("$s.Save()\n")
-	}
-	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", "-")
-	cmd.Stdin = strings.NewReader(sb.String())
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
 
-// iconPath is the icon file next to the installed exe
-func iconPath() string { return filepath.Join(Dir(), "altserialport.ico") }
-
-// psQuote quotes a string for PowerShell: within single quotes nothing is
-// expanded, and a quote is written twice
-func psQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
-}
-
-// writeUninstallEntry writes the entry of the program in "Installed apps"
-func writeUninstallEntry(exe, dir string) error {
+// register adds or updates the entry in "Installed apps"; it runs the
+// installed binary with UninstallArg to remove the program
+func register(icon string) error {
 	k, _, err := registry.CreateKey(registry.CURRENT_USER, uninstallKey, registry.SET_VALUE)
 	if err != nil {
 		return err
 	}
 	defer k.Close()
+	exe := ExePath()
 	var sizeKB uint32
 	if fi, err := os.Stat(exe); err == nil {
-		sizeKB = uint32((fi.Size() + 1023) / 1024)
+		sizeKB = uint32(fi.Size() / 1024)
 	}
-	strs := []struct{ name, value string }{
+	values := []struct{ name, value string }{
 		{"DisplayName", app.DisplayName},
-		{"DisplayVersion", app.Version},
+		{"DisplayVersion", strings.TrimPrefix(app.Version, "v")},
 		{"Publisher", app.Author},
-		{"DisplayIcon", iconPath()},
-		{"InstallLocation", dir},
-		{"UninstallString", `"` + exe + `" --uninstall`},
-		{"QuietUninstallString", `"` + exe + `" --uninstall --quiet`},
+		{"DisplayIcon", icon},
+		{"InstallLocation", Dir()},
+		{"InstallDate", time.Now().Format("20060102")},
 		{"URLInfoAbout", app.Website},
+		{"UninstallString", `"` + exe + `" ` + UninstallArg},
+		{"QuietUninstallString", `"` + exe + `" ` + UninstallArg + " " + QuietArg},
 	}
-	for _, s := range strs {
-		if err := k.SetStringValue(s.name, s.value); err != nil {
+	for _, v := range values {
+		if err := k.SetStringValue(v.name, v.value); err != nil {
 			return err
 		}
 	}
-	dwords := []struct {
-		name  string
-		value uint32
-	}{
-		{"EstimatedSize", sizeKB},
-		{"NoModify", 1},
-		{"NoRepair", 1},
-	}
-	for _, d := range dwords {
-		if err := k.SetDWordValue(d.name, d.value); err != nil {
+	for name, value := range map[string]uint32{"NoModify": 1, "NoRepair": 1, "EstimatedSize": sizeKB} {
+		if err := k.SetDWordValue(name, value); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// removeAfterExit starts cmd, apart from this process, to remove the
-// folder a second after: when the running exe has exited and can be
-// deleted. ping is the sleep that cmd has.
-func removeAfterExit(dir string) error {
-	cmd := exec.Command("cmd.exe")
-	// The command line is given as it is: cmd does not read the quotes
-	// as Go would write them
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CmdLine:       fmt.Sprintf(`cmd.exe /c ping 127.0.0.1 -n 2 > nul & rmdir /s /q "%s"`, dir),
-		HideWindow:    true,
-		CreationFlags: windows.CREATE_NO_WINDOW | windows.CREATE_NEW_PROCESS_GROUP,
-	}
-	// Not within the folder: a folder that is the current one of a process
-	// cannot be removed
-	cmd.Dir = os.TempDir()
-	if err := cmd.Start(); err != nil {
+// Uninstall removes the entry in "Installed apps", the shortcuts and the
+// files of the program; ~/.altbins with the other utilities and the
+// settings in ~/.altbins/.altserialport stay. The running binary cannot
+// delete itself, so it is deleted once it has quit.
+func Uninstall() error {
+	err := registry.DeleteKey(registry.CURRENT_USER, uninstallKey)
+	if err != nil && err != registry.ErrNotExist {
 		return err
 	}
-	return cmd.Process.Release()
+	for _, lnk := range shortcutPaths() {
+		os.Remove(lnk)
+	}
+	os.Remove(iconPath())
+	os.Remove(ExePath() + ".old")
+	if IsInstalledCopy() {
+		return deleteAfterExit(ExePath())
+	}
+	if err := os.Remove(ExePath()); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
-// The message box of Windows: the program may have no window yet when it
-// asks
+// deleteAfterExit has cmd try to delete the file every second, for up to a
+// minute, until this process and the other windows of the program have quit
+func deleteAfterExit(path string) error {
+	cmd := exec.Command("cmd.exe")
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		CmdLine: `cmd.exe /d /c for /l %i in (1,1,60) do (ping -n 2 127.0.0.1 >nul & del /f /q "` + path +
+			`" 2>nul & if not exist "` + path + `" exit /b)`,
+		HideWindow:    true,
+		CreationFlags: windows.CREATE_NO_WINDOW,
+	}
+	return cmd.Start()
+}
+
+// StartInstalled starts the installed copy, telling it that it has just been installed
+func StartInstalled() error {
+	cmd := exec.Command(ExePath(), InstalledArg)
+	cmd.Dir = Dir()
+	return cmd.Start()
+}
+
 const (
-	mbOK              = 0x00000000
-	mbYesNo           = 0x00000004
-	mbIconError       = 0x00000010
-	mbIconQuestion    = 0x00000020
-	mbIconInformation = 0x00000040
-	mbSetForeground   = 0x00010000
+	mbOK              = 0x0
+	mbYesNo           = 0x4
+	mbIconQuestion    = 0x20
+	mbIconInformation = 0x40
+	mbSetForeground   = 0x10000
 	idYes             = 6
 )
 
-var procMessageBoxW = windows.NewLazySystemDLL("user32.dll").NewProc("MessageBoxW")
+// Confirm asks a yes or no question; the uninstaller has no window of its own
+func Confirm(title, text string) bool {
+	return messageBox(title, text, mbYesNo|mbIconQuestion) == idYes
+}
 
-func messageBox(text string, flags uint32) int {
-	t, err := windows.UTF16PtrFromString(text)
+// Inform shows a message; the uninstaller has no window of its own
+func Inform(title, text string) {
+	messageBox(title, text, mbOK|mbIconInformation)
+}
+
+func messageBox(title, text string, flags uintptr) uintptr {
+	t, _ := windows.UTF16PtrFromString(title)
+	m, _ := windows.UTF16PtrFromString(text)
+	r, _, _ := procMessageBoxW.Call(0, uintptr(unsafe.Pointer(m)), uintptr(unsafe.Pointer(t)), flags|mbSetForeground)
+	return r
+}
+
+// The COM objects of a shell link (shobjidl.h): IShellLinkW fills the
+// shortcut in, IPersistFile saves it
+var (
+	clsidShellLink  = windows.GUID{Data1: 0x00021401, Data4: [8]byte{0xc0, 0, 0, 0, 0, 0, 0, 0x46}}
+	iidIShellLinkW  = windows.GUID{Data1: 0x000214f9, Data4: [8]byte{0xc0, 0, 0, 0, 0, 0, 0, 0x46}}
+	iidIPersistFile = windows.GUID{Data1: 0x0000010b, Data4: [8]byte{0xc0, 0, 0, 0, 0, 0, 0, 0x46}}
+	errNoShortcut   = errors.New("cannot create the shortcut object")
+)
+
+// The places of the methods in the tables of the interfaces
+const (
+	vtQueryInterface      = 0
+	vtRelease             = 2
+	vtSetDescription      = 7
+	vtSetWorkingDirectory = 9
+	vtSetIconLocation     = 17
+	vtSetPath             = 20
+	vtPersistFileSave     = 6
+)
+
+type comObject struct {
+	vtbl *[32]uintptr
+}
+
+func (o *comObject) call(method int, args ...uintptr) uintptr {
+	r, _, _ := syscall.SyscallN(o.vtbl[method], append([]uintptr{uintptr(unsafe.Pointer(o))}, args...)...)
+	return r
+}
+
+func (o *comObject) callStr(method int, s string) error {
+	p, err := windows.UTF16PtrFromString(s)
 	if err != nil {
-		return 0
+		return err
 	}
-	c, _ := windows.UTF16PtrFromString(app.DisplayName)
-	r, _, _ := procMessageBoxW.Call(0, uintptr(unsafe.Pointer(t)), uintptr(unsafe.Pointer(c)), uintptr(flags|mbSetForeground))
-	return int(r)
+	if hr := o.call(method, uintptr(unsafe.Pointer(p))); hr != 0 {
+		return syscall.Errno(hr)
+	}
+	return nil
+}
+
+// createShortcut saves a .lnk to the target; COM wants all the calls on one thread
+func createShortcut(lnk, target, icon string) error {
+	result := make(chan error)
+	go func() {
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
+		result <- createShortcutCOM(lnk, target, icon)
+	}()
+	return <-result
+}
+
+func createShortcutCOM(lnk, target, icon string) error {
+	const (
+		coinitApartmentThreaded = 0x2
+		clsctxInprocServer      = 0x1
+		rpcEChangedMode         = 0x80010106
+	)
+	hr, _, _ := procCoInitializeEx.Call(0, coinitApartmentThreaded)
+	switch uint32(hr) {
+	case 0, 1: // S_OK, S_FALSE: initialized here, to be balanced
+		defer procCoUninitialize.Call()
+	case rpcEChangedMode: // initialized on this thread in another mode, which works too
+	default:
+		return syscall.Errno(hr)
+	}
+
+	var link *comObject
+	hr, _, _ = procCoCreateInstance.Call(uintptr(unsafe.Pointer(&clsidShellLink)), 0, clsctxInprocServer,
+		uintptr(unsafe.Pointer(&iidIShellLinkW)), uintptr(unsafe.Pointer(&link)))
+	if hr != 0 || link == nil {
+		return errNoShortcut
+	}
+	defer link.call(vtRelease)
+
+	for _, set := range []struct {
+		method int
+		value  string
+	}{
+		{vtSetPath, target},
+		{vtSetWorkingDirectory, filepath.Dir(target)},
+		{vtSetDescription, app.DisplayName},
+	} {
+		if err := link.callStr(set.method, set.value); err != nil {
+			return err
+		}
+	}
+	// SetIconLocation takes the index of the icon in the file too
+	iconPtr, err := windows.UTF16PtrFromString(icon)
+	if err != nil {
+		return err
+	}
+	if hr := link.call(vtSetIconLocation, uintptr(unsafe.Pointer(iconPtr)), 0); hr != 0 {
+		return syscall.Errno(hr)
+	}
+
+	var file *comObject
+	if hr := link.call(vtQueryInterface, uintptr(unsafe.Pointer(&iidIPersistFile)), uintptr(unsafe.Pointer(&file))); hr != 0 || file == nil {
+		return errNoShortcut
+	}
+	defer file.call(vtRelease)
+	lnkPtr, err := windows.UTF16PtrFromString(lnk)
+	if err != nil {
+		return err
+	}
+	if hr := file.call(vtPersistFileSave, uintptr(unsafe.Pointer(lnkPtr)), 1); hr != 0 {
+		return syscall.Errno(hr)
+	}
+	return nil
 }

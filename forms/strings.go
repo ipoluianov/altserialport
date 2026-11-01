@@ -195,6 +195,10 @@ type Strings struct {
 	MenuHexDump          string
 	MenuHTML             string
 	RS485Label           string
+	InstallAsk           string
+	InstallFailed        string
+	UninstallAsk         string
+	Uninstalled          string
 	HeldBy               string
 	InstallLink          string
 	UpdateLink           string
@@ -504,7 +508,11 @@ var english = Strings{
 	InstallLink:          "Install",
 	UpdateLink:           "Update",
 	UninstallLink:        "Uninstall",
-	Installed:            "AltSerialPort is installed. It is in the Start menu and on the desktop.",
+	Installed:            "AltSerialPort is installed",
+	InstallAsk:           "AltSerialPort will be copied to %s and added to the Start menu, the desktop and the list of installed apps. If it is already installed there, it is updated. The settings and the profiles stay as they are.\n\nAltSerialPort will then restart from there.",
+	InstallFailed:        "AltSerialPort could not be installed:\n\n%s",
+	UninstallAsk:         "Remove AltSerialPort from this computer?\n\nThe settings, the profiles and the logs stay in %s",
+	Uninstalled:          "AltSerialPort has been removed.",
 	AttachedTo:           "Attached by %s",
 }
 
@@ -808,8 +816,12 @@ var russian = Strings{
 	HeldBy:               "Его открыла программа: %s",
 	InstallLink:          "Установить",
 	UpdateLink:           "Обновить",
-	UninstallLink:        "Удалить программу",
-	Installed:            "AltSerialPort установлена. Она есть в меню «Пуск» и на рабочем столе.",
+	UninstallLink:        "Удалить",
+	Installed:            "AltSerialPort установлен",
+	InstallAsk:           "AltSerialPort будет скопирован в %s и добавлен в меню «Пуск», на рабочий стол и в список установленных приложений. Если он там уже установлен, он обновится. Настройки и профили останутся как есть.\n\nЗатем AltSerialPort перезапустится оттуда.",
+	InstallFailed:        "Не удалось установить AltSerialPort:\n\n%s",
+	UninstallAsk:         "Удалить AltSerialPort с этого компьютера?\n\nНастройки, профили и логи останутся в %s",
+	Uninstalled:          "AltSerialPort удалён.",
 	AttachedTo:           "Подключился %s",
 }
 
