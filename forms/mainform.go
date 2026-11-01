@@ -63,6 +63,7 @@ type MainForm struct {
 	pending atomic.Bool // the session has chunks to take
 
 	port2       *Port2
+	menuBtn     *ui.ToolButton
 	stopRemote  func()
 	plotter     *Plotter
 	macros      *MacroPanel
@@ -171,7 +172,7 @@ func NewMainForm() *MainForm {
 // toolbar builds the row of the main functions
 func (m *MainForm) toolbar() ui.Widgeter {
 	tb := ui.NewToolBar()
-	tb.SetPanelPadding(4)
+	tb.SetPanelPadding(0)
 
 	m.portCombo = ui.NewComboBox()
 	m.portCombo.SetMinWidth(240)
@@ -261,14 +262,24 @@ func (m *MainForm) toolbar() ui.Widgeter {
 	clearAct.SetTooltip(T().ClearTip + " (Ctrl+Shift+L)")
 	addTool(tb, clearAct)
 
-	tb.AddStretch()
-	var menuBtn *ui.ToolButton
-	menuBtn = iconButton("menu", func() string { return T().MenuTip }, func() {
-		x, y := menuBtn.RectClientAreaOnWindow()
-		m.Form.ShowContextMenu(m.mainMenu(), x+menuBtn.Width()-260, y+menuBtn.Height())
+	tb.SetXExpandable(true)
+	row := ui.NewPanel()
+	row.SetPanelPadding(4)
+	row.AddWidget(0, 0, m.menuButton())
+	row.AddWidget(0, 1, tb)
+	return row
+}
+
+// menuButton is the first button of the toolbar: everything that is not
+// on the toolbar is in its menu
+func (m *MainForm) menuButton() *ui.ToolButton {
+	b := iconButton("menu", func() string { return T().MenuTip }, nil)
+	b.SetOnClick(func() {
+		x, y := b.RectClientAreaOnWindow()
+		m.Form.ShowContextMenu(m.mainMenu(), x, y+b.Height())
 	})
-	tb.Add(menuBtn)
-	return tb
+	m.menuBtn = b
+	return b
 }
 
 // addTool adds the button of the action, out of the focus chain

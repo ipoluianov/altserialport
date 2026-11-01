@@ -84,7 +84,7 @@ Website: https://altbins.pro/altserialport/
 
 | Place | What is there |
 | --- | --- |
-| Toolbar | Port, baud, frame, Connect; Text / Hex / Mixed; timestamps, pause, record, find, clear; ☰ menu |
+| Toolbar | ☰ menu; port, baud, frame, Connect; Text / Hex / Mixed; timestamps, pause, record, find, clear |
 | Terminal | The data. Right-click: copy, timestamps, line breaks, encoding, packet gap, hex width, wrap, sent data, echo |
 | Send line | Command, Text/Hex, line ending, Send. Right-click: checksum, repeat, send file, escapes |
 | Status bar | State, port, RX/TX counters, log, lines. Click DTR/RTS to switch; right-click: reset board, BREAK, counters |

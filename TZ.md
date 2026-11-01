@@ -70,7 +70,7 @@ One window, four zones. Nothing else is visible by default.
 
 ```
 ┌───────────────────────────────────────────────────────────────────────┐
-│ [ttyUSB0 · CH340 ▾][115200 ▾][8N1 ▾] [Connect] │ Text Hex Mix │ ⏱ ⏸ ● 🔍 🗑  ☰ │ toolbar
+│ ☰ [ttyUSB0 · CH340 ▾][115200 ▾][8N1 ▾] [Connect] │ Text Hex Mix │ ⏱ ⏸ ● 🔍 🗑  │ toolbar
 ├───────────────────────────────────────────────────────────────────────┤
 │ boot: v1.4.2                                                          │
 │ wifi: connecting...                                                   │ terminal
@@ -88,6 +88,7 @@ One window, four zones. Nothing else is visible by default.
 
 | Item | What it does |
 | --- | --- |
+| ☰ | The first button: settings, tools, panels, theme, language, always on top, shortcuts, about |
 | Port | List of ports with their chip and description; a new port is marked |
 | Baud | Editable combo: presets or any number |
 | Frame | 8N1, 8E1, 8O1, 7E1, 7O1, 8N2…; "More…" opens the port settings |
@@ -98,7 +99,6 @@ One window, four zones. Nothing else is visible by default.
 | Record | Logs to a file; red while recording |
 | Find | The search bar over the terminal |
 | Clear | Clears the screen |
-| ☰ | Settings, theme, language, always on top, shortcuts, about |
 
 **Context menus: everything else, where it belongs**
 
